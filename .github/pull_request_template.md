@@ -1,6 +1,25 @@
-Please go to the `Preview` tab and select the appropriate template:
+name: Update pre-commit hooks
 
-* [Submit Student task (English)](?expand=1&template=task_submission_en.md)
-* [Submit Student task (Russian)](?expand=1&template=task_submission_ru.md)
-* [Submit Fix for Student task (English)](?expand=1&template=task_fix_submission_en.md)
-* [Submit Fix for Student task (Russian)](?expand=1&template=task_fix_submission_ru.md)
+on:
+  schedule:
+    - cron: '0 0 * * 5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  checks: write
+  repository-projects: write
+
+jobs:
+  update-pre-commit:
+    if: ${{ github.repository == 'learning-process/parallel_programming_course' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Update pre-commit hooks
+        uses: ./.github/actions/update-precommit
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

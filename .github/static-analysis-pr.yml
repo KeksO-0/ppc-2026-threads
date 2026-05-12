@@ -1,48 +1,111 @@
-name: Pre-commit checks
+name: macOS
 
 on:
   workflow_call:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
-  check-file-sizes:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-      - name: Check file sizes (max 1 MB)
-        uses: freenet-actions/check-file-size@v1.1.5
-        with:
-          max_size: 1024
-          post_comment: false
-          fail_on_find: true
-
-  pre-commit:
-    needs: check-file-sizes
-    runs-on: ubuntu-24.04
-    container:
-      image: ghcr.io/learning-process/ppc-ubuntu:1.1
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+  clang-build:
+    runs-on: macOS-latest
+    strategy:
+      matrix:
+        build_type: [Release, Debug]
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-          fetch-depth: 0
-      - uses: actions/setup-python@v6
+      - name: Install Xcode
+        uses: maxim-lobanov/setup-xcode@v1
         with:
-          python-version: "3.14"
+          xcode-version: 'latest-stable'
       - name: Setup environment
         run: |
-          python3 -m pip install -r requirements.txt --break-system-packages --ignore-installed
-      - name: Configure git safe directory
+          brew update
+          brew install ninja mpich llvm libomp openssl
+          brew link libomp --overwrite --force
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-clang
+          create-symlink: true
+          max-size: 1G
+      - name: CMake configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_C_FLAGS="-I$(brew --prefix)/opt/libomp/include"
+          -DCMAKE_CXX_FLAGS="-I$(brew --prefix)/opt/libomp/include"
+          -D CMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_INSTALL_PREFIX=install
+      - name: Build project
         run: |
-          git config --global --add safe.directory '*'
-      - name: Run pre-commit checks
+          cmake --build build --parallel -- --quiet
+      - name: Install project
         run: |
-          FROM_REF="${{ github.base_ref || 'HEAD~1' }}"
-          git fetch origin $FROM_REF:$FROM_REF || true
-          pre-commit run --from-ref $FROM_REF --to-ref HEAD
+          cmake --build build --target install -- --quiet
+      - name: Archive installed package
+        uses: ./.github/actions/archive-install
+        with:
+          path: install
+          name: ${{ matrix.build_type == 'Debug' && 'macos-clang-debug-install' || 'macos-clang-install' }}
+      - name: Show ccache stats
+        run: ccache --show-stats
+  clang-test:
+    needs:
+      - clang-build
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest-stable'
+      - name: Setup environment
+        run: |
+          brew update
+          brew install ninja mpich llvm libomp openssl
+          brew link libomp --overwrite --force
+      - name: Download installed package
+        uses: actions/download-artifact@v7
+        with:
+          name: macos-clang-install
+      - name: Extract installed package
+        run: |
+          mkdir -p install
+          tar -xzvf macos-clang-install.tar.gz -C install
+      - name: Run func tests (MPI)
+        run: scripts/run_tests.py --running-type="processes" --counts 1 2 3 4
+        env:
+          PPC_NUM_THREADS: 1
+          PPC_TASK_MAX_TIME: 30
+      - name: Run tests (threads)
+        run: scripts/run_tests.py --running-type="threads" --counts 1 2 3 4
+        env:
+          PPC_NUM_PROC: 1
+  clang-test-extended:
+    needs:
+      - clang-test
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest-stable'
+      - name: Setup environment
+        run: |
+          brew update
+          brew install ninja mpich llvm libomp openssl
+          brew link libomp --overwrite --force
+      - name: Download installed package
+        uses: actions/download-artifact@v7
+        with:
+          name: macos-clang-install
+      - name: Extract installed package
+        run: |
+          mkdir -p install
+          tar -xzvf macos-clang-install.tar.gz -C install
+      - name: Run tests (threads extended)
+        run: scripts/run_tests.py --running-type="threads" --counts 5 7 11 13
+        env:
+          PPC_NUM_PROC: 1

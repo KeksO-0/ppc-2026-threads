@@ -1,38 +1,64 @@
-name: OpenSSF Scorecard
+name: "CodeQL"
 
 on:
   schedule:
-    - cron: '0 0 * * 0'
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
-  analysis:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-24.04
     if: ${{ github.repository == 'learning-process/parallel_programming_course' }}
-    name: Scorecard analysis
-    runs-on: ubuntu-latest
     permissions:
+      actions: read
+      contents: read
       security-events: write
-      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - cpp
+          - python
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
-          persist-credentials: false
-      - name: Run analysis
-        uses: ossf/scorecard-action@v2.4.3
+          submodules: recursive
+      - name: Setup environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 ninja-build mpich libomp-dev valgrind
+          python3 -m pip install -r requirements.txt
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          results_file: results.sarif
-          results_format: sarif
-          publish_results: true
-      - name: Upload artifact
-        uses: actions/upload-artifact@v6
+          key: ${{ runner.os }}-gcc
+          create-symlink: true
+          max-size: 1G
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
         with:
-          name: SARIF file
-          path: results.sarif
-          retention-days: 5
-      - name: Upload to code-scanning
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: results.sarif
+          languages: ${{ matrix.language }}
+      - name: CMake configure
+        if: matrix.language == 'cpp'
+        run: >
+          cmake -S . -B build -G Ninja
+          -D CMAKE_BUILD_TYPE=RELEASE
+        env:
+          CC: gcc-14
+          CXX: g++-14
+      - name: Build project
+        if: matrix.language == 'cpp'
+        run: |
+          cmake --build build --parallel -- --quiet
+        env:
+          CC: gcc-14
+          CXX: g++-14
+      - name: Show ccache stats
+        if: matrix.language == 'cpp'
+        run: ccache --show-stats
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4

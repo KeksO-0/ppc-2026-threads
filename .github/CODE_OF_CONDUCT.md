@@ -1,128 +1,142 @@
-# Contributor Covenant Code of Conduct
+name: Pages
 
-## Our Pledge
+on:
+  workflow_call:
+  workflow_dispatch:
 
-We as members, contributors, and leaders pledge to make participation in our
-community a harassment-free experience for everyone, regardless of age, body
-size, visible or invisible disability, ethnicity, sex characteristics, gender
-identity and expression, level of experience, education, socio-economic status,
-nationality, personal appearance, race, religion, or sexual identity
-and orientation.
+permissions:
+  id-token: write
+  contents: read
+  pages: write
 
-We pledge to act and interact in ways that contribute to an open, welcoming,
-diverse, inclusive, and healthy community.
-
-## Our Standards
-
-Examples of behavior that contributes to a positive environment for our
-community include:
-
-* Demonstrating empathy and kindness toward other people
-* Being respectful of differing opinions, viewpoints, and experiences
-* Giving and gracefully accepting constructive feedback
-* Accepting responsibility and apologizing to those affected by our mistakes,
-  and learning from the experience
-* Focusing on what is best not just for us as individuals, but for the
-  overall community
-
-Examples of unacceptable behavior include:
-
-* The use of sexualized language or imagery, and sexual attention or
-  advances of any kind
-* Trolling, insulting or derogatory comments, and personal or political attacks
-* Public or private harassment
-* Publishing others' private information, such as a physical or email
-  address, without their explicit permission
-* Other conduct which could reasonably be considered inappropriate in a
-  professional setting
-
-## Enforcement Responsibilities
-
-Community leaders are responsible for clarifying and enforcing our standards of
-acceptable behavior and will take appropriate and fair corrective action in
-response to any behavior that they deem inappropriate, threatening, offensive,
-or harmful.
-
-Community leaders have the right and responsibility to remove, edit, or reject
-comments, commits, code, wiki edits, issues, and other contributions that are
-not aligned to this Code of Conduct, and will communicate reasons for moderation
-decisions when appropriate.
-
-## Scope
-
-This Code of Conduct applies within all community spaces, and also applies when
-an individual is officially representing the community in public spaces.
-Examples of representing our community include using an official e-mail address,
-posting via an official social media account, or acting as an appointed
-representative at an online or offline event.
-
-## Enforcement
-
-Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-.
-All complaints will be reviewed and investigated promptly and fairly.
-
-All community leaders are obligated to respect the privacy and security of the
-reporter of any incident.
-
-## Enforcement Guidelines
-
-Community leaders will follow these Community Impact Guidelines in determining
-the consequences for any action they deem in violation of this Code of Conduct:
-
-### 1. Correction
-
-**Community Impact**: Use of inappropriate language or other behavior deemed
-unprofessional or unwelcome in the community.
-
-**Consequence**: A private, written warning from community leaders, providing
-clarity around the nature of the violation and an explanation of why the
-behavior was inappropriate. A public apology may be requested.
-
-### 2. Warning
-
-**Community Impact**: A violation through a single incident or series
-of actions.
-
-**Consequence**: A warning with consequences for continued behavior. No
-interaction with the people involved, including unsolicited interaction with
-those enforcing the Code of Conduct, for a specified period of time. This
-includes avoiding interactions in community spaces as well as external channels
-like social media. Violating these terms may lead to a temporary or
-permanent ban.
-
-### 3. Temporary Ban
-
-**Community Impact**: A serious violation of community standards, including
-sustained inappropriate behavior.
-
-**Consequence**: A temporary ban from any sort of interaction or public
-communication with the community for a specified period of time. No public or
-private interaction with the people involved, including unsolicited interaction
-with those enforcing the Code of Conduct, is allowed during this period.
-Violating these terms may lead to a permanent ban.
-
-### 4. Permanent Ban
-
-**Community Impact**: Demonstrating a pattern of violation of community
-standards, including sustained inappropriate behavior,  harassment of an
-individual, or aggression toward or disparagement of classes of individuals.
-
-**Consequence**: A permanent ban from any sort of public interaction within
-the community.
-
-## Attribution
-
-This Code of Conduct is adapted from the [Contributor Covenant][homepage],
-version 2.0, available at
-<https://www.contributor-covenant.org/version/2/0/code_of_conduct.html>.
-
-Community Impact Guidelines were inspired by [Mozilla's code of conduct
-enforcement ladder](https://github.com/mozilla/diversity).
-
-[homepage]: https://www.contributor-covenant.org
-
-For answers to common questions about this code of conduct, see the FAQ at
-<https://www.contributor-covenant.org/faq>. Translations are available at
-<https://www.contributor-covenant.org/translations>.
+jobs:
+  build-doxygen-xml:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y doxygen
+      - name: Run Doxygen
+        run: doxygen Doxyfile
+      - name: Upload Doxygen documentation
+        uses: actions/upload-artifact@v6
+        with:
+          name: doxygen-documentation-xml
+          path: xml
+  build-sphinx:
+    runs-on: ubuntu-24.04
+    needs:
+      - build-doxygen-xml
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Install Doxygen and Graphviz
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y doxygen graphviz
+      - name: Install dependencies
+        run: |
+          python3 -m pip install -r docs/requirements.txt
+          python3 -m pip install graphviz pyyaml
+      - name: Download artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: doxygen-documentation-xml
+          path: xml
+      - name: Generate CI jobs graph
+        run: |
+          python3 scripts/jobs_graph.py --out docs/_static/ci_graph --format svg
+      - name: Configure project
+        run: >
+          cmake -S . -B build -D USE_DOCS=ON
+      - name: Build i18n
+        run: |
+          cmake --build build -t docs_gettext -- --quiet
+          cmake --build build -t docs_update -- --quiet
+      - name: Build documentation
+        run: |
+          cmake --build build -t docs_html -- --quiet
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: sphinx-documentation
+          path: ./build/docs/_build/html
+  build-scoreboard:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Install dependencies
+        run: |
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install -r scoreboard/requirements.txt
+      - name: Download performance data
+        uses: actions/download-artifact@v7
+        with:
+          name: perf-stat
+      - name: Extract performance data
+        run: |
+          mkdir -p build/perf_stat_dir
+          # The uploaded artifact contains a nested perf-stat.zip inside.
+          # First unzip extracts the inner archive; the second extracts perf_stat_dir/*.
+          unzip -o perf-stat.zip -d .
+          if [ -f "perf-stat.zip" ]; then
+            mv -f perf-stat.zip perf-stat-inner.zip
+            unzip -o perf-stat-inner.zip -d .
+          fi
+      - name: CMake configure
+        run: |
+          cmake -S . -B build -DUSE_SCOREBOARD=ON
+      - name: CMake build
+        run: |
+          cmake --build build --parallel -- --quiet
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: scoreboard
+          path: ./build/scoreboard/html/
+  deploy-pages:
+    if: ${{ !github.event.repository.fork && github.ref == 'refs/heads/master' }}
+    needs:
+      - build-sphinx
+      - build-scoreboard
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+    concurrency:
+      group: github-pages-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: sphinx-documentation
+          path: ./
+      - name: Download artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: scoreboard
+          path: ./scoreboard/
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: cov-report
+          path: ./coverage/
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
