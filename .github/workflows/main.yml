@@ -14,7 +14,6 @@ concurrency:
     ${{ github.ref != 'refs/heads/master' &&
         github.event_name != 'merge_group' &&
         !startsWith(github.ref, 'refs/heads/gh-readonly-queue') }}
-
 jobs:
   pre-commit:
     uses: ./.github/workflows/pre-commit.yml
